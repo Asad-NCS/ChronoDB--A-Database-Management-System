@@ -1,0 +1,1 @@
+//Record struct, table schema, constants
