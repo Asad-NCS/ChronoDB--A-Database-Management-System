@@ -1,8 +1,4 @@
-========================================
-   ChronoDB SQL Command Reference
-========================================
-
-=== BASIC OPERATIONS ===
+BASIC OPERATIONS 
 
 1. CREATE TABLE
    Syntax: CREATE TABLE <table_name> (<field1> <type>, <field2> <type>, ...);
@@ -44,9 +40,8 @@
    Example: exit;
    Note: Closes the ChronoDB CLI
 
-========================================
 
-=== GRAPH OPERATIONS ===
+GRAPH OPERATIONS
 
 1. CREATE GRAPH
    Syntax: GRAPH CREATE <graph_name>;
@@ -95,9 +90,8 @@
    Example: GRAPH DIJKSTRA myGraph A C;
    Note: Finds shortest path between two vertices
 
-========================================
 
-=== EXAMPLE WORKFLOW ===
+EXAMPLE WORKFLOW
 
 ChronoDB> CREATE TABLE students (id INT, name STRING, gpa FLOAT);
 [SUCCESS]: Table 'students' created.
@@ -133,11 +127,9 @@ ChronoDB> SELECT * FROM students;
 |  2 |  Bob  | 3.5 |
 +----+-------+-----+
 
-ChronoDB> exit;
+ChronoDB> EXIT;
 
-========================================
-
-=== IMPORTANT NOTES ===
+IMPORTANT NOTES
 
 - All commands must end with a semicolon (;)
 - Table names, field names, and vertex names are case-sensitive
@@ -147,5 +139,3 @@ ChronoDB> exit;
 - GPA must be a float value (e.g., 3.8, 4.0)
 - UNDO/REDO maintain a stack of operations
 - Graph operations require vertices to exist before adding edges between them
-
-========================================
