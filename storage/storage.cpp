@@ -248,37 +248,11 @@ namespace ChronoDB {
     }
 
     bool StorageEngine::updateRecord(const string& tableName, int id, const Record& newRecord) {
-        string path = tableDataPath(tableName);
-
-        ifstream in(path, ios::binary);
-        if (!in) return false;
-
-        vector<Record> records;
-        while (true) {
-            vector<uint8_t> buffer(PAGE_SIZE);
-            if (!in.read((char*)buffer.data(), buffer.size())) break;
-
-            Page p;
-            p.deserializeFromBuffer(buffer);
-
-            if (p.slotCount == 0) break;
-
-            for (uint16_t s = 0; s < p.slots.size(); ++s) {
-                if (!p.slots[s].active) continue;
-                vector<uint8_t> raw;
-                if (p.readRawRecord(s, raw)) {
-                    Record rec;
-                    if (deserializeRecord(raw, rec)) {
-                        records.push_back(rec);
-                    }
-                }
-            }
-        }
-        in.close();
+        vector<Record> records = loadAllRecords(tableName);
 
         bool updated = false;
         for (auto& r : records) {
-            if (get<int>(r.fields[0]) == id) {  // ID is first field
+            if (get<int>(r.fields[0]) == id) {
                 r = newRecord;
                 updated = true;
                 break;
@@ -286,7 +260,7 @@ namespace ChronoDB {
         }
         if (!updated) return false;
 
-        ofstream out(path, ios::binary | ios::trunc);
+        ofstream out(tableDataPath(tableName), ios::binary | ios::trunc);
         for (const auto& rec : records) {
             vector<uint8_t> bytes;
             serializeRecord(rec, bytes);
@@ -305,12 +279,58 @@ namespace ChronoDB {
     }
 
     bool StorageEngine::deleteRecord(const string& tableName, int id) {
+        vector<Record> records = loadAllRecords(tableName);
+
+        size_t before = records.size();
+
+        records.erase(
+            remove_if(records.begin(), records.end(),
+                [&](const Record& r) { return get<int>(r.fields[0]) == id; }),
+            records.end()
+        );
+
+        if (records.size() == before) return false;  // not found
+
+        ofstream out(tableDataPath(tableName), ios::binary | ios::trunc);
+        for (const auto& rec : records) {
+            vector<uint8_t> bytes;
+            serializeRecord(rec, bytes);
+            Page newPage;
+            newPage.pageID = 0;
+            auto optSlot = newPage.insertRawRecord(bytes);
+            if (optSlot.has_value()) {
+                vector<uint8_t> buffer;
+                newPage.serializeToBuffer(buffer);
+                out.write((char*)buffer.data(), buffer.size());
+            }
+        }
+        out.close();
+
+        return true;
+    }
+
+    vector<Record> StorageEngine::selectAll(const string& tableName) {
+        vector<Record> outRecords;
+        uint32_t pages = pageCount(tableName);
+        for (uint32_t i = 0; i < pages; ++i) {
+            Page p; readPageFromFile(tableName, i, p);
+            for (uint16_t s = 0; s < p.slots.size(); ++s) {
+                if (!p.slots[s].active) continue;
+                vector<uint8_t> raw; p.readRawRecord(s, raw);
+                Record rec; if (deserializeRecord(raw, rec)) outRecords.push_back(move(rec));
+            }
+        }
+        return outRecords;
+    }
+
+    // Helper method to load all records from a table (used by update/delete to avoid redundancy)
+    vector<Record> StorageEngine::loadAllRecords(const string& tableName) const {
+        vector<Record> records;
         string path = tableDataPath(tableName);
 
         ifstream in(path, ios::binary);
-        if (!in) return false;
+        if (!in) return records;
 
-        vector<Record> records;
         while (true) {
             vector<uint8_t> buffer(PAGE_SIZE);
             if (!in.read((char*)buffer.data(), buffer.size())) break;
@@ -332,35 +352,7 @@ namespace ChronoDB {
             }
         }
         in.close();
-
-        int before = records.size();
-
-        records.erase(
-            remove_if(records.begin(), records.end(),
-                [&](const Record& r) { return get<int>(r.fields[0]) == id; }),
-            records.end()
-        );
-
-        if (records.size() == before) return false;  // not found
-
-        ofstream out(path, ios::binary | ios::trunc);
-        out.close();
-
-        return true;
-    }
-
-    vector<Record> StorageEngine::selectAll(const string& tableName) {
-        vector<Record> outRecords;
-        uint32_t pages = pageCount(tableName);
-        for (uint32_t i = 0; i < pages; ++i) {
-            Page p; readPageFromFile(tableName, i, p);
-            for (uint16_t s = 0; s < p.slots.size(); ++s) {
-                if (!p.slots[s].active) continue;
-                vector<uint8_t> raw; p.readRawRecord(s, raw);
-                Record rec; if (deserializeRecord(raw, rec)) outRecords.push_back(move(rec));
-            }
-        }
-        return outRecords;
+        return records;
     }
 
 } // namespace ChronoDB

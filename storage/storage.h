@@ -70,6 +70,7 @@ namespace ChronoDB {
 
         static void serializeRecord(const Record& r, vector<uint8_t>& out);
         static bool deserializeRecord(const vector<uint8_t>& in, Record& out);
+        vector<Record> loadAllRecords(const string& tableName) const;
 
         uint32_t pageCount(const string& tableName) const;
         uint32_t appendEmptyPage(const string& tableName);
