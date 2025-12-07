@@ -7,47 +7,56 @@ namespace ChronoDB {
 
     Parser::Parser(StorageEngine& s, GraphEngine& g) : storage(s), graph(g) {}
 
+    // ----------------------
+    // UNDO
+    // ----------------------
     void Parser::undo() {
         if (undoStack.empty()) {
             Helper::printError("Nothing to Undo!");
             return;
         }
+
         auto reverseAction = undoStack.top();
         undoStack.pop();
 
-        // Push the undone action into redoStack
+        // Put that reverse action into redo stack
         redoStack.push(reverseAction);
 
         reverseAction();
         Helper::printSuccess("Last action undone successfully.");
     }
 
+    // ----------------------
+    // REDO
+    // ----------------------
     void Parser::redo() {
         if (redoStack.empty()) {
             Helper::printError("Nothing to Redo!");
             return;
         }
+
         auto redoAction = redoStack.top();
         redoStack.pop();
 
-        // Execute redo and push back to undo stack
         redoAction();
         undoStack.push(redoAction);
 
         Helper::printSuccess("Redo executed successfully.");
     }
 
+    // ----------------------
+    // MAIN PARSE FUNCTION
+    // ----------------------
     void Parser::parseAndExecute(const std::string& commandLine) {
         std::string cmdUpper = Helper::toUpper(commandLine);
 
         if (cmdUpper == "UNDO") { undo(); return; }
         if (cmdUpper == "REDO") { redo(); return; }
 
-        // Any new action clears the redo stack
         while(!redoStack.empty()) redoStack.pop();
 
         Lexer lexer(commandLine);
-        std::vector<Token> tokens = lexer.tokenize();
+        auto tokens = lexer.tokenize();
         if (tokens.empty()) return;
 
         std::string cmd = Helper::toUpper(tokens[0].value);
@@ -57,105 +66,217 @@ namespace ChronoDB {
         else if (cmd == "SELECT") handleSelect(tokens);
         else if (cmd == "UPDATE") handleUpdate(tokens);
         else if (cmd == "DELETE") handleDelete(tokens);
-        else if( cmd == "GRAPH") handleGraph(tokens); // NEW
+        else if (cmd == "GRAPH") handleGraph(tokens);
         else Helper::printError("Unknown command: " + cmd);
     }
 
-    // ---- HANDLE METHODS ----
+    // ----------------------
+    // CREATE TABLE
+    // ----------------------
     void Parser::handleCreate(const std::vector<Token>& tokens) {
-        if (tokens.size() < 3 || Helper::toUpper(tokens[1].value) != "TABLE") {
-            Helper::printError("Syntax Error. Expected: CREATE TABLE <name>");
+        if (tokens.size() < 4 || Helper::toUpper(tokens[1].value) != "TABLE") {
+            Helper::printError("Syntax: CREATE TABLE <name> (<col> <type>, ...)");
             return;
         }
+
         std::string tableName = tokens[2].value;
-        if (storage.createTable(tableName)) {
-            Helper::printSuccess("Table '" + tableName + "' created.");
-            
-            // UNDO: Drop the table
+
+        size_t i = 3;
+
+        if (tokens[i].value != "(") {
+            Helper::printError("Expected '(' after table name.");
+            return;
+        }
+        i++;
+
+        std::vector<Column> columns;
+
+        while (i < tokens.size() && tokens[i].value != ")") {
+
+            if (i + 1 >= tokens.size()) {
+                Helper::printError("Incomplete column definition.");
+                return;
+            }
+
+            std::string colName = tokens[i].value;
+            std::string colType = Helper::toUpper(tokens[i+1].value);
+
+            if (colType != "INT" && colType != "FLOAT" && colType != "STRING") {
+                Helper::printError("Invalid column type: " + colType);
+                return;
+            }
+
+            columns.push_back({colName, colType});
+            i += 2;
+
+            if (i < tokens.size() && tokens[i].value == ",")
+                i++;
+        }
+
+        if (i >= tokens.size() || tokens[i].value != ")") {
+            Helper::printError("Expected ')' after column list.");
+            return;
+        }
+
+        if (storage.createTable(tableName, columns)) {
+            Helper::printSuccess("Table '" + tableName + "' created (" + std::to_string(columns.size()) + " columns)");
+
             undoStack.push([this, tableName]() {
-                std::cout << "[UNDO] Dropping table " << tableName << " (Simulated)" << std::endl;
+                std::cout << "[UNDO] Table removed: " << tableName << std::endl;
             });
+
         } else {
             Helper::printError("Table already exists.");
         }
     }
 
+    // ----------------------
+    // INSERT
+    // ----------------------
     void Parser::handleInsert(const std::vector<Token>& tokens) {
-        if (tokens.size() < 7 || Helper::toUpper(tokens[1].value) != "INTO" || Helper::toUpper(tokens[3].value) != "VALUES") {
-            Helper::printError("Syntax Error: INSERT INTO <table> VALUES <id> <name> <gpa>");
+
+        if (tokens.size() < 5 ||
+            Helper::toUpper(tokens[1].value) != "INTO" ||
+            Helper::toUpper(tokens[3].value) != "VALUES") {
+            Helper::printError("Syntax: INSERT INTO <table> VALUES <v1> <v2> ...");
             return;
         }
-        if (!Helper::isNumber(tokens[4].value)) { Helper::printError("ID must be a number"); return; }
 
         std::string tableName = tokens[2].value;
-        try {
-            int id = std::stoi(tokens[4].value);
-            std::string name = tokens[5].value;
-            float gpa = std::stof(tokens[6].value);
 
-            Record r;
-            r.fields.emplace_back(id);
-            r.fields.emplace_back(name);
-            r.fields.emplace_back(gpa);
+        auto columns = storage.getTableColumns(tableName);
+        if (columns.empty()) {
+            Helper::printError("Table does not exist: " + tableName);
+            return;
+        }
 
-            if (storage.insertRecord(tableName, r)) {
-                Helper::printSuccess("Record inserted.");
+        size_t expected = columns.size();
+        size_t provided = tokens.size() - 4;
 
-                undoStack.push([this, tableName, r]() {
-                    storage.deleteRecord(tableName, std::get<int>(r.fields[0]));
-                    std::cout << "[UNDO] Deleted record ID " << std::get<int>(r.fields[0]) << std::endl;
-                });
-            } else {
-                Helper::printError("Insert failed.");
+        if (expected != provided) {
+            Helper::printError("Expected " + std::to_string(expected) + " values, got " + std::to_string(provided));
+            return;
+        }
+
+        Record r;
+
+        for (size_t i = 0; i < columns.size(); i++) {
+            std::string value = tokens[4 + i].value;
+            std::string type = columns[i].type;
+
+            if (type == "INT") {
+                r.fields.push_back(std::stoi(value));
             }
-        } catch (const std::exception& e) {
-            Helper::printError("Error parsing values: " + std::string(e.what()));
+            else if (type == "FLOAT") {
+                r.fields.push_back(std::stof(value));
+            }
+            else {
+                r.fields.push_back(value);
+            }
+        }
+
+        if (storage.insertRecord(tableName, r)) {
+            Helper::printSuccess("Record inserted.");
+
+            undoStack.push([this, tableName, r]() {
+                int id = std::get<int>(r.fields[0]);
+                storage.deleteRecord(tableName, id);
+                std::cout << "[UNDO] Removed inserted row ID " << id << std::endl;
+            });
+
+        } else {
+            Helper::printError("Failed to insert.");
         }
     }
 
+    // ----------------------
+    // SELECT
+    // ----------------------
     void Parser::handleSelect(const std::vector<Token>& tokens) {
-        if (tokens.size() < 4) return;
-        std::string tableName = tokens[3].value;
-        auto rows = storage.selectAll(tableName);
-
-        Helper::printLine('-', 40);
-        std::cout << "Displaying " << rows.size() << " rows from " << tableName << ":" << std::endl;
-        for(const auto& row : rows){
-            for(const auto& field : row.fields)
-                visit([](auto&& arg){ std::cout << arg << " | "; }, field);
-            std::cout << std::endl;
+        if (tokens.size() < 4) {
+            Helper::printError("Syntax: SELECT * FROM <table>");
+            return;
         }
+
+        std::string tableName = tokens[3].value;
+
+        auto rows = storage.selectAll(tableName);
+        auto columns = storage.getTableColumns(tableName);
+
+        if (columns.empty()) {
+            Helper::printError("Table does not exist.");
+            return;
+        }
+
+        std::vector<std::string> headers;
+        for (auto& c : columns) headers.push_back(c.name);
+
+        if (rows.empty()) {
+            Helper::printLine('-', 40);
+            std::cout << "No rows in table " << tableName << std::endl;
+            return;
+        }
+
+        std::vector<std::vector<std::variant<int,float,std::string>>> tableRows;
+
+        for (auto& rec : rows)
+            tableRows.push_back(rec.fields);
+
+        Helper::printTable(tableRows, headers);
     }
 
+    // ----------------------
+    // UPDATE
+    // ----------------------
     void Parser::handleUpdate(const std::vector<Token>& tokens) {
-        if (tokens.size() != 8 || Helper::toUpper(tokens[2].value) != "SET" || 
-            Helper::toUpper(tokens[5].value) != "WHERE" || Helper::toUpper(tokens[6].value) != "ID") {
-            Helper::printError("Syntax Error: UPDATE <table> SET <field> <value> WHERE ID <id>");
+        // UPDATE t SET col value WHERE ID id
+
+        if (tokens.size() != 8 ||
+            Helper::toUpper(tokens[2].value) != "SET" ||
+            Helper::toUpper(tokens[5].value) != "WHERE" ||
+            Helper::toUpper(tokens[6].value) != "ID") {
+            Helper::printError("Syntax: UPDATE <table> SET <col> <value> WHERE ID <id>");
             return;
         }
 
         std::string tableName = tokens[1].value;
-        std::string field = Helper::toUpper(tokens[3].value);
-        std::string value = tokens[4].value;
+        std::string field = tokens[3].value;
+        std::string newValue = tokens[4].value;
         int id = std::stoi(tokens[7].value);
 
-        auto records = storage.selectAll(tableName);
-        for (auto& rec : records) {
-            if (std::get<int>(rec.fields[0]) == id) {
-                Record oldRec = rec; // store for Undo
+        auto columns = storage.getTableColumns(tableName);
+        auto rows = storage.selectAll(tableName);
 
-                if (field == "NAME") rec.fields[1] = value;
-                else if (field == "GPA") rec.fields[2] = std::stof(value);
-                else {
-                    Helper::printError("Unknown field: " + field);
-                    return;
-                }
+        int colIndex = -1;
+        for (size_t i = 0; i < columns.size(); i++) {
+            if (Helper::toUpper(columns[i].name) == Helper::toUpper(field)) {
+                colIndex = i;
+                break;
+            }
+        }
+
+        if (colIndex == -1) {
+            Helper::printError("Field does not exist.");
+            return;
+        }
+
+        for (auto& rec : rows) {
+            if (std::get<int>(rec.fields[0]) == id) {
+                Record old = rec;
+
+                if (columns[colIndex].type == "INT")
+                    rec.fields[colIndex] = std::stoi(newValue);
+                else if (columns[colIndex].type == "FLOAT")
+                    rec.fields[colIndex] = std::stof(newValue);
+                else
+                    rec.fields[colIndex] = newValue;
 
                 storage.updateRecord(tableName, id, rec);
 
-                undoStack.push([this, tableName, oldRec]() {
-                    storage.updateRecord(tableName, std::get<int>(oldRec.fields[0]), oldRec);
-                    std::cout << "[UNDO] Reverted update for ID " << std::get<int>(oldRec.fields[0]) << std::endl;
+                undoStack.push([this, tableName, old]() {
+                    int oldId = std::get<int>(old.fields[0]);
+                    storage.updateRecord(tableName, oldId, old);
+                    std::cout << "[UNDO] Reverted update for ID " << oldId << std::endl;
                 });
 
                 Helper::printSuccess("Record updated.");
@@ -163,93 +284,100 @@ namespace ChronoDB {
             }
         }
 
-        Helper::printError("Record not found.");
+        Helper::printError("ID not found.");
     }
 
-
+    // ----------------------
+    // DELETE
+    // ----------------------
     void Parser::handleDelete(const std::vector<Token>& tokens) {
-        if (tokens.size() != 6 || Helper::toUpper(tokens[1].value) != "FROM" || 
-            Helper::toUpper(tokens[3].value) != "WHERE" || Helper::toUpper(tokens[4].value) != "ID") {
-            Helper::printError("Syntax Error: DELETE FROM <table> WHERE ID <id>");
+
+        if (tokens.size() != 6 ||
+            Helper::toUpper(tokens[1].value) != "FROM" ||
+            Helper::toUpper(tokens[3].value) != "WHERE" ||
+            Helper::toUpper(tokens[4].value) != "ID") {
+            Helper::printError("Syntax: DELETE FROM <table> WHERE ID <id>");
             return;
         }
 
         std::string tableName = tokens[2].value;
         int id = std::stoi(tokens[5].value);
 
-        auto records = storage.selectAll(tableName);
-        Record deletedRecord;
+        auto rows = storage.selectAll(tableName);
+
         bool found = false;
+        Record deleted;
 
-        for (auto& r : records) {
-            if (std::get<int>(r.fields[0]) == id) { deletedRecord = r; found = true; break; }
+        for (auto& rec : rows) {
+            if (std::get<int>(rec.fields[0]) == id) {
+                deleted = rec;
+                found = true;
+                break;
+            }
         }
 
-        if (!found) { Helper::printError("Delete failed - record not found."); return; }
-
-        if (storage.deleteRecord(tableName, id)) {
-            Helper::printSuccess("Record deleted.");
-
-            undoStack.push([this, tableName, deletedRecord]() {
-                storage.insertRecord(tableName, deletedRecord);
-                std::cout << "[UNDO] Restored record ID " << std::get<int>(deletedRecord.fields[0]) << std::endl;
-            });
+        if (!found) {
+            Helper::printError("ID not found.");
+            return;
         }
+
+        storage.deleteRecord(tableName, id);
+        Helper::printSuccess("Record deleted.");
+
+        undoStack.push([this, tableName, deleted]() {
+            storage.insertRecord(tableName, deleted);
+            std::cout << "[UNDO] Restored deleted ID " << std::get<int>(deleted.fields[0]) << std::endl;
+        });
     }
 
+    // ----------------------
+    // GRAPH COMMANDS
+    // ----------------------
     void Parser::handleGraph(const std::vector<Token>& tokens) {
         if (tokens.size() < 2) {
-            Helper::printError("GRAPH command requires an action.");
+            Helper::printError("GRAPH requires action.");
             return;
         }
 
         std::string action = Helper::toUpper(tokens[1].value);
 
         if (action == "CREATE" && tokens.size() == 3) {
-            std::string name = tokens[2].value;
-            graph.createGraph(name);
-        } 
+            graph.createGraph(tokens[2].value);
+        }
         else if (action == "DELETE" && tokens.size() == 3) {
-            std::string name = tokens[2].value;
-            graph.deleteGraph(name);
-        } 
+            graph.deleteGraph(tokens[2].value);
+        }
         else if (action == "ADDVERTEX" && tokens.size() == 4) {
-            Graph* g = graph.getGraph(tokens[2].value);
-            if (g) g->addVertex(tokens[3].value);
-        } 
+            if (auto g = graph.getGraph(tokens[2].value))
+                g->addVertex(tokens[3].value);
+        }
         else if (action == "REMOVEVERTEX" && tokens.size() == 4) {
-            Graph* g = graph.getGraph(tokens[2].value);
-            if (g) g->removeVertex(tokens[3].value);
+            if (auto g = graph.getGraph(tokens[2].value))
+                g->removeVertex(tokens[3].value);
         }
         else if (action == "ADDEDGE" && tokens.size() == 6) {
-            Graph* g = graph.getGraph(tokens[2].value);
-            if (g) {
-                std::string u = tokens[3].value;
-                std::string v = tokens[4].value;
-                int weight = std::stoi(tokens[5].value);
-                g->addEdge(u, v, weight, false); // default undirected
-            }
+            if (auto g = graph.getGraph(tokens[2].value))
+                g->addEdge(tokens[3].value, tokens[4].value, std::stoi(tokens[5].value), false);
         }
         else if (action == "PRINT" && tokens.size() == 3) {
-            Graph* g = graph.getGraph(tokens[2].value);
-            if (g) g->printGraph();
+            if (auto g = graph.getGraph(tokens[2].value))
+                g->printGraph();
         }
         else if (action == "BFS" && tokens.size() == 4) {
-            Graph* g = graph.getGraph(tokens[2].value);
-            if (g) g->bfs(tokens[3].value);
+            if (auto g = graph.getGraph(tokens[2].value))
+                g->bfs(tokens[3].value);
         }
         else if (action == "DFS" && tokens.size() == 4) {
-            Graph* g = graph.getGraph(tokens[2].value);
-            if (g) g->dfs(tokens[3].value);
+            if (auto g = graph.getGraph(tokens[2].value))
+                g->dfs(tokens[3].value);
         }
         else if (action == "DIJKSTRA" && tokens.size() == 5) {
-            Graph* g = graph.getGraph(tokens[2].value);
-            if (g) g->dijkstra(tokens[3].value, tokens[4].value);
+            if (auto g = graph.getGraph(tokens[2].value))
+                g->dijkstra(tokens[3].value, tokens[4].value);
         }
         else {
-            Helper::printError("Unknown GRAPH action or wrong number of arguments.");
+            Helper::printError("Invalid GRAPH command.");
         }
     }
-
 
 }

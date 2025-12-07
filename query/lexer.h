@@ -21,11 +21,12 @@ namespace ChronoDB {
     public:
         explicit Lexer(std::string input);
         Token nextToken();
-        std::vector<Token> tokenize(); // Returns all tokens at once
+        std::vector<Token> tokenize();
 
     private:
         std::string src;
         size_t pos = 0;
+
         char current();
         void advance();
         void skipWhitespace();

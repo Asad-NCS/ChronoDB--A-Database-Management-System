@@ -18,13 +18,13 @@ namespace ChronoDB {
     }
 
     Token Lexer::readString() {
-        advance(); // Skip opening quote
+        advance(); 
         std::string val;
         while (current() != '"' && current() != '\0') {
             val += current();
             advance();
         }
-        advance(); // Skip closing quote
+        advance(); 
         return {TokenType::STRING_LITERAL, val};
     }
 
@@ -43,8 +43,7 @@ namespace ChronoDB {
             val += current();
             advance();
         }
-        // Simple check for keywords (could be expanded)
-        return {TokenType::IDENTIFIER, val}; // Parser will decide if it's a keyword
+        return {TokenType::IDENTIFIER, val};
     }
 
     Token Lexer::nextToken() {
@@ -55,19 +54,16 @@ namespace ChronoDB {
         if (isdigit(current())) return readNumber();
         if (current() == '"') return readString();
 
-        // Handle multi-character symbols
         char c = current();
         advance();
-        
-        // Check for two-character operators
+
         if ((c == '=' || c == '!' || c == '<' || c == '>') && current() == '=') {
             std::string sym(1, c);
             sym += '=';
             advance();
             return {TokenType::SYMBOL, sym};
         }
-        
-        // Single char symbols
+
         std::string sym(1, c);
         return {TokenType::SYMBOL, sym};
     }

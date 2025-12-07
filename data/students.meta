@@ -1,1 +1,2 @@
 table=students
+columns=id:INT,name:STRING,gpa:FLOAT

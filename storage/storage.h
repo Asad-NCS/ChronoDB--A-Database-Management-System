@@ -11,7 +11,19 @@ using namespace std;
 
 namespace ChronoDB {
 
-    // Page constants
+    // Column description
+    struct Column {
+        string name;   // column name (e.g., id, name)
+        string type;   // INT, FLOAT, STRING
+    };
+
+    // Full schema for a table
+    struct TableSchema {
+        vector<Column> columns;
+        string primaryKey;
+    }; // <-- FIXED missing semicolon
+
+    // -------- Page Constants --------
     static constexpr uint32_t PAGE_SIZE = 8192; // 8 KB
     static constexpr uint16_t PAGE_HEADER_RESERVED = 64;
 
@@ -27,6 +39,7 @@ namespace ChronoDB {
         uint32_t pageID = 0;
         uint16_t slotCount = 0;
         uint16_t freeSpaceOffset = PAGE_HEADER_RESERVED;
+
         vector<SlotEntry> slots;
         vector<uint8_t> data;
 
@@ -39,20 +52,27 @@ namespace ChronoDB {
         optional<uint16_t> insertRawRecord(const vector<uint8_t>& rec);
         bool deleteSlot(uint16_t slotID);
         bool readRawRecord(uint16_t slotID, vector<uint8_t>& out) const;
+
         void serializeToBuffer(vector<uint8_t>& buffer) const;
         void deserializeFromBuffer(const vector<uint8_t>& buffer);
     };
 
     struct TableMeta {
         string tableName;
+        vector<Column> columns;
     };
 
     class StorageEngine {
     public:
         StorageEngine(const string& storageDir = "./data");
         ~StorageEngine();
-        
+
+        // Create table WITH schema
+        bool createTable(const string& tableName, const vector<Column>& columns);
+
+        // Old version (no schema)
         bool createTable(const string& tableName);
+
         bool insertRecord(const string& tableName, const Record& rec);
         vector<Record> selectAll(const string& tableName);
 
@@ -61,6 +81,13 @@ namespace ChronoDB {
 
         bool writePageToFile(const string& tableName, uint32_t pageIndex, const Page& page);
         bool readPageFromFile(const string& tableName, uint32_t pageIndex, Page& outPage);
+
+        // Schema access
+        vector<Column> getTableColumns(const string& tableName) const;
+
+        // === NEW: Full schema I/O ===
+        TableSchema loadSchema(const string& tableName) const;
+        bool saveSchema(const string& tableName, const TableSchema& schema) const;
 
     private:
         string storageDirectory;
@@ -74,6 +101,11 @@ namespace ChronoDB {
 
         uint32_t pageCount(const string& tableName) const;
         uint32_t appendEmptyPage(const string& tableName);
+
+        // helpers
+        bool writeMetaFile(const string& tableName, const vector<Column>& columns) const;
+        optional<vector<Column>> readMetaFile(const string& tableName) const;
+        static bool typeStringMatchesValue(const string& typeStr, const RecordValue& v);
     };
 
 } // namespace ChronoDB

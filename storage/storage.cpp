@@ -1,8 +1,10 @@
+// storage.cpp
 #include "storage.h"
 #include <filesystem>
 #include <cstring>
 #include <iostream>
 #include <algorithm>
+#include <sstream>
 using namespace std;
 namespace fs = std::filesystem;
 
@@ -100,28 +102,52 @@ namespace ChronoDB {
         return storageDirectory + "/" + tableName + ".meta";
     }
 
-    bool StorageEngine::createTable(const string& tableName) {
-    string path = tableDataPath(tableName);
-    if (fs::exists(path)) return false;
+    // New createTable with columns (writes meta + empty tbl)
+    bool StorageEngine::createTable(const string& tableName, const vector<Column>& columns) {
+        string path = tableDataPath(tableName);
+        if (fs::exists(path)) return false;
 
-    ofstream out(path, ios::binary);
-    Page p;
-    p.pageID = 0;
+        // Validate: require at least one column and first column must be INT (primary key)
+        if (columns.empty()) return false;
+        string firstTypeUpper = columns[0].type;
+        transform(firstTypeUpper.begin(), firstTypeUpper.end(), firstTypeUpper.begin(), ::toupper);
+        if (firstTypeUpper != "INT") {
+            // We require first column to be INT primary key for now
+            return false;
+        }
 
-    vector<uint8_t> buffer;  // lvalue
-    p.serializeToBuffer(buffer);  // pass the named vector
-    out.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
-    out.close();
+        // create empty data file (one empty page)
+        ofstream out(path, ios::binary);
+        Page p;
+        p.pageID = 0;
+        vector<uint8_t> buffer;
+        p.serializeToBuffer(buffer);
+        out.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+        out.close();
 
-    ofstream meta(tableMetaPath(tableName));
-    if (meta) { 
-        meta << "table=" << tableName << "\n"; 
-        meta.close(); 
+        // write meta
+        if (!writeMetaFile(tableName, columns)) return false;
+        return true;
     }
 
-    return true;
-}
+    // Backwards-compatible createTable that writes an empty table with no meta
+    bool StorageEngine::createTable(const string& tableName) {
+        string path = tableDataPath(tableName);
+        if (fs::exists(path)) return false;
 
+        ofstream out(path, ios::binary);
+        Page p;
+        p.pageID = 0;
+        vector<uint8_t> buffer;
+        p.serializeToBuffer(buffer);
+        out.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+        out.close();
+
+        // write simple meta with zero columns
+        vector<Column> cols;
+        writeMetaFile(tableName, cols);
+        return true;
+    }
 
     uint32_t StorageEngine::pageCount(const string& tableName) const {
         string path = tableDataPath(tableName);
@@ -165,6 +191,7 @@ namespace ChronoDB {
         return true;
     }
 
+    // record serialisation (unchanged)
     void StorageEngine::serializeRecord(const Record& r, vector<uint8_t>& out) {
         out.clear();
         uint16_t fieldCount = static_cast<uint16_t>(r.fields.size());
@@ -225,20 +252,50 @@ namespace ChronoDB {
         return true;
     }
 
-    bool StorageEngine::insertRecord(const string& tableName, const Record& rec) {
-        vector<Record> records = loadAllRecords(tableName);
+    // helper: check a schema type string matches a RecordValue
+    bool StorageEngine::typeStringMatchesValue(const string& typeStr, const RecordValue& v) {
+        string t = typeStr;
+        transform(t.begin(), t.end(), t.begin(), ::toupper);
+        if (t == "INT") return holds_alternative<int>(v);
+        if (t == "FLOAT") return holds_alternative<float>(v);
+        if (t == "STRING") return holds_alternative<string>(v);
+        return false;
+    }
 
-        int id = get<int>(rec.fields[0]);
-        // Remove existing record with same ID if present
-        records.erase(
-            remove_if(records.begin(), records.end(),
+    bool StorageEngine::insertRecord(const string& tableName, const Record& rec) {
+        // validate schema matches
+        auto colsOpt = readMetaFile(tableName);
+        if (!colsOpt.has_value()) return false;
+        vector<Column> cols = colsOpt.value();
+
+        if (cols.empty()) {
+            // fallback: accept any (legacy)
+        } else {
+            if (rec.fields.size() != cols.size()) return false;
+
+            // require first column is int (primary key)
+            if (!holds_alternative<int>(rec.fields[0])) return false;
+
+            // types match
+            for (size_t i = 0; i < cols.size(); ++i) {
+                if (!typeStringMatchesValue(cols[i].type, rec.fields[i])) return false;
+            }
+        }
+
+        // load all records, remove existing with same id (upsert behaviour)
+        vector<Record> records = loadAllRecords(tableName);
+        if (rec.fields.size() > 0 && holds_alternative<int>(rec.fields[0])) {
+            int id = get<int>(rec.fields[0]);
+            records.erase(
+                remove_if(records.begin(), records.end(),
                     [&](const Record& r){ return get<int>(r.fields[0]) == id; }),
-            records.end()
-        );
+                records.end()
+            );
+        }
 
         records.push_back(rec);
 
-        // Write all records to file using same logic as updateRecord
+        // write all records back (pack into pages)
         ofstream out(tableDataPath(tableName), ios::binary | ios::trunc);
         if (!out) return false;
 
@@ -261,8 +318,19 @@ namespace ChronoDB {
         return true;
     }
 
-
     bool StorageEngine::updateRecord(const string& tableName, int id, const Record& newRecord) {
+        auto colsOpt = readMetaFile(tableName);
+        if (!colsOpt.has_value()) return false;
+        vector<Column> cols = colsOpt.value();
+
+        if (!cols.empty()) {
+            if (newRecord.fields.size() != cols.size()) return false;
+            // types match
+            for (size_t i = 0; i < cols.size(); ++i) {
+                if (!typeStringMatchesValue(cols[i].type, newRecord.fields[i])) return false;
+            }
+        }
+
         vector<Record> records = loadAllRecords(tableName);
         bool updated = false;
         for (auto& r : records) {
@@ -270,7 +338,7 @@ namespace ChronoDB {
         }
         if (!updated) return false;
 
-        // Clear file
+        // write back
         ofstream out(tableDataPath(tableName), ios::binary | ios::trunc);
         if (!out) return false;
 
@@ -281,7 +349,6 @@ namespace ChronoDB {
             serializeRecord(rec, bytes);
             auto optSlot = p.insertRawRecord(bytes);
             if (!optSlot.has_value()) {
-                // Page full, write current page and start new page
                 vector<uint8_t> buffer; p.serializeToBuffer(buffer);
                 out.write((char*)buffer.data(), buffer.size());
                 p = Page();
@@ -294,7 +361,6 @@ namespace ChronoDB {
         out.close();
         return true;
     }
-
 
     bool StorageEngine::deleteRecord(const string& tableName, int id) {
         vector<Record> records = loadAllRecords(tableName);
@@ -310,18 +376,23 @@ namespace ChronoDB {
         if (records.size() == before) return false;  // not found
 
         ofstream out(tableDataPath(tableName), ios::binary | ios::trunc);
+        if (!out) return false;
+
+        Page p;
+        p.pageID = 0;
         for (const auto& rec : records) {
             vector<uint8_t> bytes;
             serializeRecord(rec, bytes);
-            Page newPage;
-            newPage.pageID = 0;
-            auto optSlot = newPage.insertRawRecord(bytes);
-            if (optSlot.has_value()) {
-                vector<uint8_t> buffer;
-                newPage.serializeToBuffer(buffer);
+            auto optSlot = p.insertRawRecord(bytes);
+            if (!optSlot.has_value()) {
+                vector<uint8_t> buffer; p.serializeToBuffer(buffer);
                 out.write((char*)buffer.data(), buffer.size());
+                p = Page(); p.pageID++;
+                p.insertRawRecord(bytes);
             }
         }
+        vector<uint8_t> buffer; p.serializeToBuffer(buffer);
+        out.write((char*)buffer.data(), buffer.size());
         out.close();
 
         return true;
@@ -371,6 +442,70 @@ namespace ChronoDB {
         }
         in.close();
         return records;
+    }
+
+    // --- Meta file helpers ---
+    // meta format: columns=col1:TYPE,col2:TYPE,col3:TYPE
+    bool StorageEngine::writeMetaFile(const string& tableName, const vector<Column>& columns) const {
+        string path = tableMetaPath(tableName);
+        ofstream m(path, ios::trunc);
+        if (!m) return false;
+
+        m << "table=" << tableName << "\n";
+        m << "columns=";
+        for (size_t i = 0; i < columns.size(); ++i) {
+            m << columns[i].name << ":" << columns[i].type;
+            if (i + 1 < columns.size()) m << ",";
+        }
+        m << "\n";
+        m.close();
+        return true;
+    }
+
+    optional<vector<Column>> StorageEngine::readMetaFile(const string& tableName) const {
+        string path = tableMetaPath(tableName);
+        if (!fs::exists(path)) return nullopt;
+
+        ifstream m(path);
+        if (!m) return nullopt;
+
+        string line;
+        vector<Column> cols;
+        while (getline(m, line)) {
+            // trim
+            if (line.rfind("columns=", 0) == 0) {
+                string rest = line.substr(strlen("columns="));
+                // split by ','
+                stringstream ss(rest);
+                string token;
+                while (getline(ss, token, ',')) {
+                    // token like name:TYPE
+                    size_t pos = token.find(':');
+                    if (pos == string::npos) continue;
+                    string cname = token.substr(0, pos);
+                    string ctype = token.substr(pos + 1);
+                    // trim spaces
+                    auto trim = [](string s)->string{
+                        size_t a = 0;
+                        while (a < s.size() && isspace((unsigned char)s[a])) a++;
+                        size_t b = s.size();
+                        while (b> a && isspace((unsigned char)s[b-1])) b--;
+                        return s.substr(a, b-a);
+                    };
+                    cname = trim(cname);
+                    ctype = trim(ctype);
+                    cols.push_back({cname, ctype});
+                }
+            }
+        }
+        m.close();
+        return cols;
+    }
+
+    vector<Column> StorageEngine::getTableColumns(const string& tableName) const {
+        auto opt = readMetaFile(tableName);
+        if (!opt.has_value()) return {};
+        return opt.value();
     }
 
 } // namespace ChronoDB
