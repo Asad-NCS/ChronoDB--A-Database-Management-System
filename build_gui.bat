@@ -1,0 +1,19 @@
+@echo off
+echo Compiling ChronoDB GUI...
+
+g++ -std=c++17 -o chronodb_gui.exe -I. -I "C:/raylib/raylib/src" -I "C:/raylib/include" -L "C:/raylib/raylib/src" src/gui.cpp query/lexer.cpp query/parser.cpp storage/storage.cpp graph/graph.cpp utils/helpers.cpp utils/sorting.cpp indexing/index.cpp transactions/transactions.cpp -lraylib -lgdi32 -lwinmm
+
+if %ERRORLEVEL% EQU 0 (
+    echo.
+    echo =========================================
+    echo   COMPILATION SUCCESS!
+    echo =========================================
+    echo Run chronodb_gui.exe to start.
+) else (
+    echo.
+    echo =========================================
+    echo   COMPILATION FAILED
+    echo =========================================
+    echo Check the errors above.
+)
+pause

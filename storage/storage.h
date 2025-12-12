@@ -7,6 +7,11 @@
 #include <fstream>
 #include <optional>
 #include "../utils/types.h"
+#include "../utils/types.h"
+#include <unordered_map>
+#include "../src/structures/avl_tree.h"
+#include "../src/structures/bst.h"
+#include "../src/structures/hash_table.h"
 using namespace std;
 
 namespace ChronoDB {
@@ -21,7 +26,7 @@ namespace ChronoDB {
     struct TableSchema {
         vector<Column> columns;
         string primaryKey;
-    }; // <-- FIXED missing semicolon
+    }; 
 
     // -------- Page Constants --------
     static constexpr uint32_t PAGE_SIZE = 8192; // 8 KB
@@ -79,6 +84,9 @@ namespace ChronoDB {
         bool updateRecord(const string& tableName, int id, const Record& newRecord);
         bool deleteRecord(const string& tableName, int id);
 
+        // BENCHMARKING AID
+        bool search(const std::string& tableName, int id); // Returns true if found
+
         bool writePageToFile(const string& tableName, uint32_t pageIndex, const Page& page);
         bool readPageFromFile(const string& tableName, uint32_t pageIndex, Page& outPage);
 
@@ -106,6 +114,39 @@ namespace ChronoDB {
         bool writeMetaFile(const string& tableName, const vector<Column>& columns) const;
         optional<vector<Column>> readMetaFile(const string& tableName) const;
         static bool typeStringMatchesValue(const string& typeStr, const RecordValue& v);
+
+        // --- Multi-Structure Management ---
+        enum class StructureType { HEAP, AVL, BST, HASH };
+        
+        // Registry: TableName -> StructureType
+        unordered_map<string, StructureType> tableStructures;
+
+        // In-Memory Structures (since we aren't persisting them to disk for this project demo)
+        // TableName -> Instance
+        unordered_map<string, AVLTree> avlTables;
+        unordered_map<string, BST> bstTables;
+        unordered_map<string, HashTable> hashTables;
+
+    public:
+        // Expose method to create with specific structure
+        bool createTable(const string& tableName, const vector<Column>& columns, const string& structureType);
+        
+        // Expose method to get structure type
+        StructureType getStructureType(const string& tableName) const;
+        
+        // Expose getters for specific tables (for Parser access to BFS/DFS)
+        BST* getBST(const string& tableName) {
+             if (bstTables.find(tableName) != bstTables.end()) return &bstTables[tableName];
+             return nullptr;
+        }
+
+        // GUI HELPERS
+        // Returns list of all table names found in data directory
+        vector<string> getTableNames() const;
+        // Returns true if table exists (used for GUI checks)
+        bool tableExists(const string& tableName) const;
+
+    // Closing brace from original class
     };
 
 } // namespace ChronoDB

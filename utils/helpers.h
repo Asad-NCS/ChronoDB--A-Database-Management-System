@@ -1,8 +1,10 @@
 //Implementation of helpers like toUpper,isNumber etc.
-#pragma once//this means the file will be included only once
+#pragma once
 #include <string>
 #include <vector>
 #include <variant>
+#include <iostream>
+
 using namespace std;
 
 namespace Helper {
@@ -15,11 +17,18 @@ namespace Helper {
     void printError(const string& message);
     void printSuccess(const string& message);
     void printRecord(const vector<string>& fields);
-    void printLine(char ch='-', int count=40); // 40 is default length
+    void printLine(char ch='-', int count=40);
 
-    // Pretty table printing for SELECT
+    // Pretty table printing
     void printTable(
         const vector<vector<variant<int, float, string>>>& rows,
         const vector<string>& headers
     );
+
+    // Output Capture for GUI (Added)
+    void startCapture();
+    string stopCapture();
+    string getCaptured();
+    void print(const string& msg);
+    void println(const string& msg);
 }
