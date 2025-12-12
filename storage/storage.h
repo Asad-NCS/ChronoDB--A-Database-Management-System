@@ -140,6 +140,12 @@ namespace ChronoDB {
              return nullptr;
         }
 
+        // GUI HELPERS
+        // Returns list of all table names found in data directory
+        vector<string> getTableNames() const;
+        // Returns true if table exists (used for GUI checks)
+        bool tableExists(const string& tableName) const;
+
     // Closing brace from original class
     };
 
