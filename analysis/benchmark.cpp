@@ -23,16 +23,14 @@ void runBenchmark(StorageEngine& storage, int N) {
     cout << "   BENCHMARK SUITE (N=" << N << ")" << endl;
     cout << "==========================================" << endl;
 
-    // -------------------------------------------------
     // 1. CREATE TABLES
-    // -------------------------------------------------
+
     storage.createTable(tHeap, cols, "HEAP");
     storage.createTable(tAvl, cols, "AVL");
     storage.createTable(tHash, cols, "HASH");
 
-    // -------------------------------------------------
     // 2. INSERTION TEST
-    // -------------------------------------------------
+
     cout << "\n[INSERTION] Inserting " << N << " records..." << endl;
     
     // HEAP
@@ -89,7 +87,8 @@ void runBenchmark(StorageEngine& storage, int N) {
     // -------------------------------------------------
     // 4. RANGE SEARCH TEST (ID > N/2)
     // -------------------------------------------------
-    // We will compare:
+
+    // Comparison of:
     // A. Linear Scan (manual iteration)
     // B. Sort + Binary Search (using Utils::Sorting)
     cout << "\n[RANGE SEARCH] Query: ID > " << (N/2) << "..." << endl;
@@ -138,14 +137,15 @@ int main() {
     // Checking main.cpp... StorageEngine storage; -> uses "data".
     // Checking benchmark.cpp previous -> StorageEngine storage("data_bench");
     
-    // Ensure "data_bench" exists or is handled.
+    // Ensure data_bench exists or is handled.
     // The previous benchmark code used "data_bench".
     
     // Clean up previous bench data if possible?
     // Not implementing recursive delete here, assume StorageEngine handles or we append.
     // Ideally we'd delete the folder system command but let's just run.
 
-    StorageEngine storage("analysis_data"); // Distinct folder
+    // distinct folder
+    StorageEngine storage("analysis_data");
     
     // N = 1,000
     runBenchmark(storage, 1000);
