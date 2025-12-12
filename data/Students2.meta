@@ -1,2 +1,0 @@
-table=Students2
-columns=id:INT,name:STRING,gpa:FLOAT

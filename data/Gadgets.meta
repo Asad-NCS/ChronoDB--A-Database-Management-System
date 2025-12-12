@@ -1,0 +1,2 @@
+table=Gadgets
+columns=id:INT,price:FLOAT,name:STRING

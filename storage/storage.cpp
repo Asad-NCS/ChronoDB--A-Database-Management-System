@@ -551,6 +551,56 @@ namespace ChronoDB {
         return cols;
     }
 
+    // --------------------------------------------------------------------------------------
+    // SEARCH (For Benchmarking)
+    // --------------------------------------------------------------------------------------
+    bool StorageEngine::search(const std::string& tableName, int id) {
+        if (tableStructures.find(tableName) == tableStructures.end()) {
+            // Attempt to load metadata to determine structure type if not already known
+            if (readMetaFile(tableName).has_value()) {
+                // Default to HEAP if no specific structure type is stored in metadata
+                // For benchmarking, we assume structure type is set during table creation
+                // or inferred from existing data. If not found, treat as HEAP.
+                tableStructures[tableName] = StructureType::HEAP;
+            } else {
+                return false; // Table does not exist
+            }
+        }
+
+        StructureType type = tableStructures[tableName];
+
+        if (type == StructureType::AVL) {
+            if (avlTables.find(tableName) != avlTables.end()) {
+                auto res = avlTables[tableName].search(id);
+                return res.has_value();
+            }
+        }
+        else if (type == StructureType::BST) {
+            if (bstTables.find(tableName) != bstTables.end()) {
+                auto res = bstTables[tableName].searchBFS(id); // Using BFS as standard search
+                return res.has_value();
+            }
+        }
+        else if (type == StructureType::HASH) {
+            if (hashTables.find(tableName) != hashTables.end()) {
+                auto res = hashTables[tableName].search(id);
+                return res.has_value();
+            }
+        }
+        else { // StructureType::HEAP or default
+            // HEAP: Linear Scan
+            // Read all blocks
+            // Reuse selectAll logic implicitly or just scan using selectAll for now
+            // because strict file parsing duplication is bad.
+            auto rows = selectAll(tableName);
+            for(auto& rec : rows) {
+                // Assuming ID is always the first field and an integer
+                if (std::get<int>(rec.fields[0]) == id) return true;
+            }
+        }
+        return false;
+    }
+
     vector<Column> StorageEngine::getTableColumns(const string& tableName) const {
         auto opt = readMetaFile(tableName);
         if (!opt.has_value()) return {};

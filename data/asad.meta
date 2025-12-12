@@ -1,0 +1,2 @@
+table=asad
+columns=id:INT,object:STRING,size:INT

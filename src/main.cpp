@@ -29,7 +29,6 @@ int main() {
         if (inputLine.empty()) continue;
 
         // Check for EXIT (case-insensitive)
-        // Check for EXIT (case-insensitive)
         std::string inputUpper = Helper::toUpper(inputLine);
         
         // Basic trim logic

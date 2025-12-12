@@ -26,7 +26,7 @@ namespace ChronoDB {
     struct TableSchema {
         vector<Column> columns;
         string primaryKey;
-    }; // <-- FIXED missing semicolon
+    }; 
 
     // -------- Page Constants --------
     static constexpr uint32_t PAGE_SIZE = 8192; // 8 KB
@@ -83,6 +83,9 @@ namespace ChronoDB {
 
         bool updateRecord(const string& tableName, int id, const Record& newRecord);
         bool deleteRecord(const string& tableName, int id);
+
+        // BENCHMARKING AID
+        bool search(const std::string& tableName, int id); // Returns true if found
 
         bool writePageToFile(const string& tableName, uint32_t pageIndex, const Page& page);
         bool readPageFromFile(const string& tableName, uint32_t pageIndex, Page& outPage);

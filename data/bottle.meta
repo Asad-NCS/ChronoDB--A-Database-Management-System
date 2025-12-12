@@ -1,2 +1,2 @@
-table=Students1
+table=bottle
 columns=id:INT,name:STRING

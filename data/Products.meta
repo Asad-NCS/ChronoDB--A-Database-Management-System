@@ -1,0 +1,2 @@
+table=Products
+columns=id:INT,name:STRING,price:FLOAT

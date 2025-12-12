@@ -10,6 +10,37 @@ using namespace std;
 
 namespace Helper {
 
+    // Capture Buffer
+    static bool isCapturing = false;
+    static std::stringstream captureBuffer;
+
+    void startCapture() {
+        isCapturing = true;
+        captureBuffer.str("");
+        captureBuffer.clear();
+    }
+
+    string stopCapture() {
+        isCapturing = false;
+        return captureBuffer.str();
+    }
+
+    string getCaptured() {
+        return captureBuffer.str();
+    }
+
+    void print(const string& msg) {
+        if (isCapturing) {
+            captureBuffer << msg;
+        } else {
+            cout << msg;
+        }
+    }
+
+    void println(const string& msg) {
+        print(msg + "\n");
+    }
+
     string trim(const string& str) {
         int start = 0;
         while (start < (int)str.size() && isspace(str[start])) start++;
@@ -41,32 +72,44 @@ namespace Helper {
     }
 
     void printError(const string& message) {
-        cout << "\033[31m[ERROR]: " << message << "\033[0m" << endl;
+        if (isCapturing) {
+             println("[ERROR]: " + message);
+        } else {
+             cout << "\033[31m[ERROR]: " << message << "\033[0m" << endl;
+        }
     }
 
     void printSuccess(const string& message) {
-        cout << "\033[32m[SUCCESS]: " << message << "\033[0m" << endl;
+        if (isCapturing) {
+             println("[SUCCESS]: " + message);
+        } else {
+             cout << "\033[32m[SUCCESS]: " << message << "\033[0m" << endl;
+        }
     }
 
     void printLine(char ch, int count) {
-        for (int i = 0; i < count; i++) cout << ch;
-        cout << endl;
+        stringstream ss;
+        for (int i = 0; i < count; i++) ss << ch;
+        println(ss.str());
     }
 
     void printRecord(const vector<string>& fields) {
-        for (const auto& field : fields) cout << field << " | ";
-        cout << endl;
+        stringstream ss;
+        for (const auto& field : fields) ss << field << " | ";
+        println(ss.str());
     }
 
     // --- Pretty table printing for SELECT ---
     void printTable(const std::vector<std::vector<std::variant<int, float, std::string>>>& rows,const std::vector<std::string>& headers) {
+        if (headers.empty()) return;
+        
         std::vector<size_t> widths(headers.size(), 0);
 
-        // 1️⃣ Calculate column widths based on headers
+        // 1. Calculate column widths based on headers
         for (size_t i = 0; i < headers.size(); i++)
             widths[i] = headers[i].size();
 
-        // 2️⃣ Calculate column widths based on data
+        // 2. Calculate column widths based on data
         for (const auto& row : rows) {
             for (size_t i = 0; i < row.size(); i++) {
                 std::string val = std::visit([](auto&& v) -> std::string {
@@ -78,41 +121,42 @@ namespace Helper {
             }
         }
 
-        // 3️⃣ Print header line
-        std::cout << "+";
-        for (auto w : widths) std::cout << std::string(w + 2, '-') << "+";
-        std::cout << "\n";
+        // Helper lambda for line
+        auto makeLine = [&](char ch) {
+            stringstream ss;
+            ss << "+";
+            for (auto w : widths) ss << string(w + 2, '-') << "+";
+            return ss.str();
+        };
 
-        // 4️⃣ Print headers
-        std::cout << "|";
+        // 3. Print Header
+        println(makeLine('-'));
+        
+        stringstream headerLine;
+        headerLine << "|";
         for (size_t i = 0; i < headers.size(); i++)
-            std::cout << " " << std::setw(widths[i]) << headers[i] << " |";
-        std::cout << "\n";
+            headerLine << " " << std::setw(widths[i]) << headers[i] << " |";
+        println(headerLine.str());
 
-        // 5️⃣ Print separator line
-        std::cout << "+";
-        for (auto w : widths) std::cout << std::string(w + 2, '-') << "+";
-        std::cout << "\n";
+        println(makeLine('-'));
 
-        // 6️⃣ Print each row
+        // 4. Print Rows
         for (const auto& row : rows) {
-            std::cout << "|";
+            stringstream rowLine;
+            rowLine << "|";
             for (size_t i = 0; i < row.size(); i++) {
                 std::string val = std::visit([](auto&& v) -> std::string {
                     std::ostringstream oss;
                     oss << v;
                     return oss.str();
                 }, row[i]);
-                std::cout << " " << std::setw(widths[i]) << val << " |";
+                rowLine << " " << std::setw(widths[i]) << val << " |";
             }
-            std::cout << "\n";
+            println(rowLine.str());
         }
 
-        // 7️⃣ Print bottom line
-        std::cout << "+";
-        for (auto w : widths) std::cout << std::string(w + 2, '-') << "+";
-        std::cout << "\n";
+        // 5. Bottom Line
+        println(makeLine('-'));
     }
-
 
 } // namespace Helper
