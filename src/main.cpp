@@ -29,12 +29,12 @@ int main() {
 
         if (inputLine.empty()) continue;
 
-        // Check for EXIT (case-insensitive)
+        // checking for exit (case-insensitive)
         string inputUpper = Helper::toUpper(inputLine);
         
-        // Basic trim logic
+        // trim logic
         size_t last = inputLine.find_last_not_of(" \t\r\n");
-        if (last == string::npos) continue; // Empty line
+        if (last == string::npos) continue;
         
         // Remove trailing whitespace from the VIEW of the line for checking ';'
         char lastChar = inputLine[last];
